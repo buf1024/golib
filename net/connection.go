@@ -53,7 +53,7 @@ type IProto interface {
 	HeadLen() int64
 	BodyLen(head []byte) int64
 	Parse(head []byte, body []byte) (interface{}, error)
-	Serialize(head []byte, body []byte) error
+	Serialize(data interface{}) ([]byte, error)
 }
 
 func NewSimpleNet(proto IProto) *SimpleNet {
@@ -71,6 +71,6 @@ func (c *SimpleNet) PollEvent() (*ConnEvent, error) {
 	return nil, nil
 }
 
-func (c *SimpleNet) SendData(conn *Connection, data []byte) error {
+func (c *SimpleNet) SendData(conn *Connection, data interface{}) error {
 	return nil
 }
