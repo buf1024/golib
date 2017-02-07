@@ -31,7 +31,7 @@ type ConnEvent struct {
 }
 
 type Connection struct {
-	mynet *SimpleNet
+	Net *SimpleNet
 
 	ID         int64
 	Type       int64
@@ -39,6 +39,7 @@ type Connection struct {
 	Conn       net.Conn
 	LocalAddr  string
 	RemoteAddr string
+	Proto      IProto // 为了实现多种proto
 
 	UserData interface{}
 }
@@ -47,6 +48,8 @@ type SimpleNet struct {
 	proto  IProto
 	conns  map[int64]*Connection
 	events chan *ConnEvent
+
+	UserData interface{}
 }
 
 type IProto interface {
@@ -56,7 +59,7 @@ type IProto interface {
 	Serialize(data interface{}) ([]byte, error)
 }
 
-func NewSimpleNet(proto IProto) *SimpleNet {
+func NewSimpleNet(proto IProto, userData interface{}) *SimpleNet {
 	return &SimpleNet{}
 }
 
