@@ -1,22 +1,17 @@
 bindir=bin
-exe=builder runner scheduler
+exe=echo_svr echo_clt
 
-builder_go=builder/*.go
-runner_go=runner/*.go
-scheduler_go=scheduler/*.go
+echo_svr_go=echo/server/*.go
+echo_clt_go=echo/client/*.go
 
 all:$(exe)
 
 
-builder: $(builder_go)
+echo_svr: $(echo_svr_go)
 	@echo "building $@"
 	go build -o $(bindir)/$@ $^
 
-runner: $(runner_go)
-	@echo "building $@"
-	go build -o $(bindir)/$@ $^
-
-scheduler: $(scheduler_go)
+echo_clt: $(echo_clt_go)
 	@echo "building $@"
 	go build -o $(bindir)/$@ $^
 
