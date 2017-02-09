@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -12,7 +13,7 @@ const (
 	EventNewConnected
 	EventError
 	EventNewData
-	EventTimer
+	EventTimeout
 )
 
 const (
@@ -29,35 +30,66 @@ type ConnEvent struct {
 }
 
 type Connection struct {
-	Net    *SimpleNet
+	net    *SimpleNet
 	listen *Listener
 
-	id      int
+	id      int64
 	status  int64
 	conn    net.Conn
 	msgChan chan []byte
 
-	LocalAddr  string
-	RemoteAddr string
-	Proto      IProto // 为了实现多种proto
-	UpTime     time.Time
-	UserData   interface{}
-}
-type Listener struct {
-	Net *SimpleNet
+	localAddr  string
+	remoteAddr string
+	upTime     time.Time
 
-	id     int
+	Proto    IProto // 为了实现多种proto
+	UserData interface{}
+}
+
+func (c *Connection) Net() *SimpleNet {
+	return c.net
+}
+func (c *Connection) ID() int64 {
+	return c.id
+}
+
+func (c *Connection) Status() int64 {
+	return c.status
+}
+
+func (c *Connection) LocalAddress() string {
+	return c.localAddr
+}
+
+func (c *Connection) RemoteAddress() string {
+	return c.remoteAddr
+}
+
+type Listener struct {
+	net *SimpleNet
+
+	id     int64
 	status int64
 	listen net.Listener
 	conns  []*Connection
 
 	lockClient sync.Locker
 
+	Proto    IProto
 	UserData interface{}
 }
 
+func (l *Listener) ID() int64 {
+	return l.id
+}
+func (l *Listener) Net() *SimpleNet {
+	return l.net
+}
+func (l *Listener) LocalAddress() string {
+	return l.listen.Addr().String()
+}
+
 type SimpleNet struct {
-	proto  IProto
 	events chan *ConnEvent
 
 	connClient []*Connection
@@ -66,77 +98,128 @@ type SimpleNet struct {
 	lockServer sync.Locker
 	lockClient sync.Locker
 
+	nextid int64
+
 	UserData interface{}
 }
 
-func (c *Connection) ID() string {
-	id := fmt.Sprintf("%d", c.id)
-	if c.listen != nil {
-		id = fmt.Sprintf("%d-%s", c.listen.id, id)
-	}
-	return id
-}
-
-func (l *Listener) ID() string {
-	return fmt.Sprintf("%d", l.id)
-}
-
 type IProto interface {
+	FilterAccept(conn *Connection) bool
 	HeadLen() int
-	BodyLen(head []byte) ([]byte, int)
-	Parse(head []byte, body []byte) (interface{}, error)
+	BodyLen(head []byte) (interface{}, int, error)
+	Parse(head interface{}, body []byte) (interface{}, error)
 	Serialize(data interface{}) ([]byte, error)
 }
 
-func NewSimpleNet(proto IProto, userData interface{}) *SimpleNet {
+// NewSimpleNet 创建
+func NewSimpleNet() *SimpleNet {
 	n := &SimpleNet{
-		proto:      proto,
 		events:     make(chan *ConnEvent, 1024),
 		connClient: make([]*Connection, 1),
 		connServer: make([]*Listener, 1),
 		lockServer: &sync.Mutex{},
 		lockClient: &sync.Mutex{},
-		UserData:   userData,
 	}
 
 	return n
 }
 
-func SimpleNetDestroy(c *SimpleNet) {
+func SimpleNetDestroy(n *SimpleNet) {
+	close(n.events)
+	for _, v := range n.connClient {
+		n.CloseConn(v)
+	}
+
+	for _, v := range n.connServer {
+		n.CloseListen(v)
+	}
+}
+
+func (n *SimpleNet) syncAddListen(listen *Listener) {
+	n.lockServer.Lock()
+	defer n.lockServer.Unlock()
+
+	n.connServer = append(n.connServer, listen)
+
+}
+func (n *SimpleNet) syncDelListen(listen *Listener) {
+	n.lockServer.Lock()
+	defer n.lockServer.Unlock()
+
+	for i, v := range n.connServer {
+		if v == listen {
+			if i == len(n.connServer)-1 {
+				n.connServer = n.connServer[:i]
+			} else {
+				n.connServer = append(n.connServer[:i], n.connServer[i:]...)
+			}
+		}
+	}
 
 }
 
-func (c *SimpleNet) syncAddListen(listen *Listener) int {
-	c.lockServer.Lock()
-	defer c.lockServer.Unlock()
+func (n *SimpleNet) syncAddClient(conn *Connection) {
+	var connQueue []*Connection
 
-	c.connServer = append(c.connServer, listen)
+	connQueue = n.connClient
+	lock := n.lockClient
+	if conn.listen != nil {
+		connQueue = conn.listen.conns
+		lock = conn.listen.lockClient
+	}
 
-	return len(c.connServer) - 1
+	lock.Lock()
+	defer lock.Unlock()
 
+	connQueue = append(connQueue, conn)
+
+	if conn.listen != nil {
+		conn.listen.conns = connQueue
+	} else {
+		n.connClient = connQueue
+	}
 }
-func (c *SimpleNet) syncAddClient(conn *Connection) int {
-	c.lockClient.Lock()
-	defer c.lockClient.Unlock()
+func (n *SimpleNet) syncDelClient(conn *Connection) {
+	var connQueue []*Connection
 
-	c.connClient = append(c.connClient, conn)
+	connQueue = n.connClient
+	lock := n.lockClient
+	if conn.listen != nil {
+		connQueue = conn.listen.conns
+		lock = conn.listen.lockClient
+	}
 
-	return len(c.connClient) - 1
+	lock.Lock()
+	defer lock.Unlock()
+
+	var del bool
+	for i, v := range connQueue {
+		if v == conn {
+			if i == len(connQueue)-1 {
+				connQueue = connQueue[:i]
+			} else {
+				connQueue = append(connQueue[:i], connQueue[i:]...)
+			}
+			del = true
+		}
+	}
+
+	if del {
+		if conn.listen != nil {
+			conn.listen.conns = connQueue
+		} else {
+			n.connClient = connQueue
+		}
+	}
 }
-func (c *SimpleNet) syncAddListenClient(listen *Listener, conn *Connection) int {
-	listen.lockClient.Lock()
-	defer listen.lockClient.Unlock()
 
-	listen.conns = append(listen.conns, conn)
-
-	return len(listen.conns) - 1
-}
-
-func (c *SimpleNet) checkConnErr(err error, conn *Connection) error {
+func (n *SimpleNet) checkConnErr(err error, conn *Connection) error {
 	if err != nil && conn.status == StatusConnected {
 		close(conn.msgChan)
 		conn.conn.Close()
 		conn.status = StatusBroken
+
+		n.syncDelClient(conn)
 
 		// emit EventError
 		event := &ConnEvent{
@@ -144,11 +227,11 @@ func (c *SimpleNet) checkConnErr(err error, conn *Connection) error {
 			Conn:      conn,
 			Data:      err,
 		}
-		c.events <- event
+		n.events <- event
 	}
 	return err
 }
-func (c *SimpleNet) handleRead(conn *Connection) {
+func (n *SimpleNet) handleRead(conn *Connection) {
 
 	for {
 		headlen := 0
@@ -158,7 +241,7 @@ func (c *SimpleNet) handleRead(conn *Connection) {
 		if headlen <= 0 {
 			buf := make([]byte, 1)
 			_, err := conn.conn.Read(buf)
-			if err = c.checkConnErr(err, conn); err != nil {
+			if err = n.checkConnErr(err, conn); err != nil {
 				return
 			}
 			// emit EventNewData
@@ -167,21 +250,21 @@ func (c *SimpleNet) handleRead(conn *Connection) {
 				Conn:      conn,
 				Data:      buf,
 			}
-			c.events <- event
+			n.events <- event
 
 		} else {
 			head := make([]byte, headlen)
 			_, err := conn.conn.Read(head)
-			if err = c.checkConnErr(err, conn); err != nil {
+			if err = n.checkConnErr(err, conn); err != nil {
 				return
 			}
-			head, bodylen := conn.Proto.BodyLen(head)
+			headmsg, bodylen, err := conn.Proto.BodyLen(head)
+			if err = n.checkConnErr(err, conn); err != nil {
+				return
+			}
 			body := make([]byte, bodylen)
-			if err = c.checkConnErr(err, conn); err != nil {
-				return
-			}
-			data, err := conn.Proto.Parse(head, body)
-			if err = c.checkConnErr(err, conn); err != nil {
+			data, err := conn.Proto.Parse(headmsg, body)
+			if err = n.checkConnErr(err, conn); err != nil {
 				return
 			}
 			// emit EventNewData
@@ -190,12 +273,13 @@ func (c *SimpleNet) handleRead(conn *Connection) {
 				Conn:      conn,
 				Data:      data,
 			}
-			c.events <- event
+			n.events <- event
 		}
+		conn.upTime = time.Now()
 	}
 }
 
-func (c *SimpleNet) handleWrite(conn *Connection) {
+func (n *SimpleNet) handleWrite(conn *Connection) {
 	for {
 		select {
 		case msg, ok := <-conn.msgChan:
@@ -204,104 +288,131 @@ func (c *SimpleNet) handleWrite(conn *Connection) {
 					return
 				}
 				_, err := conn.conn.Write(msg)
-				if err = c.checkConnErr(err, conn); err != nil {
+				if err = n.checkConnErr(err, conn); err != nil {
 					return
 				}
+				conn.upTime = time.Now()
 			}
 		}
 	}
 }
 
-func (c *SimpleNet) listening(l *Listener) {
+func (n *SimpleNet) listening(l *Listener) {
 	for {
 		newconn, err := l.listen.Accept()
 		if err != nil {
 			fmt.Printf("accept failed, err = %s\n", err)
+			if l.status != StatusListenning {
+				break
+			}
 			continue
 		}
 
 		conn := &Connection{
-			Net:        l.Net,
+			net:        l.net,
 			listen:     l,
+			id:         atomic.AddInt64(&n.nextid, 1),
 			status:     StatusConnected,
 			conn:       newconn,
 			msgChan:    make(chan []byte, 1024),
-			LocalAddr:  newconn.LocalAddr().String(),
-			RemoteAddr: newconn.RemoteAddr().String(),
-			Proto:      l.Net.proto,
-			UpTime:     time.Now(),
+			localAddr:  newconn.LocalAddr().String(),
+			remoteAddr: newconn.RemoteAddr().String(),
+			Proto:      l.Proto,
+			upTime:     time.Now(),
 		}
-		conn.id = c.syncAddListenClient(l, conn)
+
+		if conn.Proto != nil {
+			if !conn.Proto.FilterAccept(conn) {
+				continue
+			}
+		}
+
+		n.syncAddClient(conn)
 
 		// emit EventNewConnected
 		event := &ConnEvent{
 			EventType: EventNewConnected,
 			Conn:      conn,
 		}
-		c.events <- event
+		n.events <- event
 
-		go c.handleRead(conn)
-		go c.handleWrite(conn)
+		go n.handleRead(conn)
+		go n.handleWrite(conn)
 
 	}
 }
 
-func (c *SimpleNet) Listen(addr string) (*Listener, error) {
+// Listen 监听网络 addr 为监听地址
+func (n *SimpleNet) Listen(addr string) (*Listener, error) {
 	listen, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, err
 	}
 
 	l := &Listener{
-		Net:        c,
+		net: n,
+
+		id:         atomic.AddInt64(&n.nextid, 1),
 		status:     StatusListenning,
 		listen:     listen,
 		conns:      make([]*Connection, 1),
 		lockClient: &sync.Mutex{},
 	}
-	l.id = c.syncAddListen(l)
+	n.syncAddListen(l)
 
-	go c.listening(l)
+	go n.listening(l)
 
 	return l, nil
 }
-func (c *SimpleNet) Connect(host string) (*Connection, error) {
-	n, err := net.Dial("tcp", host)
+
+// Connect 连接服务器器
+func (n *SimpleNet) Connect(addr string) (*Connection, error) {
+	newconn, err := net.Dial("tcp", addr)
 	if err != nil {
 		return nil, err
 	}
 
 	conn := &Connection{
-		Net:        c,
+		net:        n,
+		id:         atomic.AddInt64(&n.nextid, 1),
 		status:     StatusConnected,
-		conn:       n,
+		conn:       newconn,
 		msgChan:    make(chan []byte, 1024),
-		LocalAddr:  n.LocalAddr().String(),
-		RemoteAddr: n.RemoteAddr().String(),
-		Proto:      c.proto,
-		UpTime:     time.Now(),
+		localAddr:  newconn.LocalAddr().String(),
+		remoteAddr: newconn.RemoteAddr().String(),
+		upTime:     time.Now(),
 	}
-	conn.id = c.syncAddClient(conn)
+	n.syncAddClient(conn)
 
-	go c.handleRead(conn)
-	go c.handleWrite(conn)
+	go n.handleRead(conn)
+	go n.handleWrite(conn)
 
 	return conn, nil
 }
 
-func (c *SimpleNet) PollEvent() (*ConnEvent, error) {
+// PollEvent 事件轮询
+func (n *SimpleNet) PollEvent(timeout int) (*ConnEvent, error) {
+	t := time.After(time.Millisecond * (time.Duration)(timeout))
 	select {
-	case event, ok := <-c.events:
+	case event, ok := <-n.events:
 		{
 			if !ok {
 				return nil, fmt.Errorf("SimpleNet destroyed")
 			}
 			return event, nil
 		}
+	case <-t:
+		{
+			evt := &ConnEvent{
+				EventType: EventTimeout,
+			}
+			return evt, nil
+		}
 	}
 }
 
-func (c *SimpleNet) SendData(conn *Connection, data interface{}) error {
+// SendData 向connection发送数据，如果connection不支持，data为[]byte
+func (n *SimpleNet) SendData(conn *Connection, data interface{}) error {
 	if conn.Proto == nil {
 		msg, ok := (data).([]byte)
 		if !ok {
@@ -315,5 +426,27 @@ func (c *SimpleNet) SendData(conn *Connection, data interface{}) error {
 		}
 		conn.msgChan <- msg
 	}
+	return nil
+}
+
+// CloseConn 关闭连接
+func (n *SimpleNet) CloseConn(conn *Connection) error {
+	conn.status = StatusBroken
+	close(conn.msgChan)
+	conn.conn.Close()
+
+	n.syncDelClient(conn)
+
+	return nil
+}
+
+// CloseListen 关闭服务器
+func (n *SimpleNet) CloseListen(listen *Listener) error {
+	for _, v := range listen.conns {
+		n.CloseConn(v)
+	}
+	listen.status = StatusBroken
+	listen.listen.Close()
+
 	return nil
 }

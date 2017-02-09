@@ -3,39 +3,53 @@ package main
 import (
 	"fmt"
 	"os"
-	"sync"
+
+	"time"
 
 	mynet "github.com/buf1024/golib/net"
 )
 
 func server(listen *mynet.Listener) {
-	n := listen.Net
-	w := (n.UserData).(*sync.WaitGroup)
+	fmt.Printf("server listenning %s\n", listen.LocalAddress())
+	n := listen.Net()
 	for {
-		evt, err := n.PollEvent()
+		evt, err := n.PollEvent(1000 * 60)
 		if err != nil {
 			fmt.Printf("poll event error!")
-			w.Done()
 			return
 		}
-		if evt.EventType == mynet.EventError {
-			fmt.Printf("event error: local = %s, remote = %s\n",
-				evt.Conn.LocalAddr, evt.Conn.RemoteAddr)
-		}
-		if evt.EventType == mynet.EventNewData {
-			fmt.Printf("server receve: %s\n", evt.Data.(string))
-			err = n.SendData(evt.Conn, evt.Data)
-			if err != nil {
-				fmt.Printf("send data error, err = %s\n", err)
+		conn := evt.Conn
+		switch {
+		case evt.EventType == mynet.EventError:
+			{
+				fmt.Printf("event error: local = %s, remote = %s\n",
+					conn.LocalAddress(), conn.RemoteAddress())
+			}
+		case evt.EventType == mynet.EventNewData:
+			{
+				data := evt.Data.([]byte)
+				fmt.Printf("%s", (string)(data))
+				err = n.SendData(evt.Conn, evt.Data)
+				if err != nil {
+					fmt.Printf("send data error, err = %s\n", err)
+				}
+			}
+		case evt.EventType == mynet.EventNewConnected:
+			{
+				fmt.Printf("client conneced: local = %s, remote = %s\n",
+					conn.LocalAddress(), conn.RemoteAddress())
+			}
+		case evt.EventType == mynet.EventTimeout:
+			{
+				fmt.Printf("poll timeout now = %d\n", time.Now().Unix())
 			}
 		}
 	}
 }
 
 func main() {
-	w := &sync.WaitGroup{}
 
-	n := mynet.NewSimpleNet(nil, w)
+	n := mynet.NewSimpleNet()
 
 	s, e := n.Listen("127.0.0.1:3369")
 	if e != nil {
@@ -43,9 +57,8 @@ func main() {
 		os.Exit(-1)
 	}
 
-	w.Add(1)
-	go server(s)
+	server(s)
 
-	w.Wait()
+	mynet.SimpleNetDestroy(n)
 
 }
