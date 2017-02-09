@@ -105,8 +105,8 @@ type SimpleNet struct {
 
 type IProto interface {
 	FilterAccept(conn *Connection) bool
-	HeadLen() int
-	BodyLen(head []byte) (interface{}, int, error)
+	HeadLen() uint32
+	BodyLen(head []byte) (interface{}, uint32, error)
 	Parse(head interface{}, body []byte) (interface{}, error)
 	Serialize(data interface{}) ([]byte, error)
 }
@@ -151,8 +151,9 @@ func (n *SimpleNet) syncDelListen(listen *Listener) {
 			if i == len(n.connServer)-1 {
 				n.connServer = n.connServer[:i]
 			} else {
-				n.connServer = append(n.connServer[:i], n.connServer[i:]...)
+				n.connServer = append(n.connServer[:i], n.connServer[i+1:]...)
 			}
+			break
 		}
 	}
 
@@ -198,9 +199,10 @@ func (n *SimpleNet) syncDelClient(conn *Connection) {
 			if i == len(connQueue)-1 {
 				connQueue = connQueue[:i]
 			} else {
-				connQueue = append(connQueue[:i], connQueue[i:]...)
+				connQueue = append(connQueue[:i], connQueue[i+1:]...)
 			}
 			del = true
+			break
 		}
 	}
 
@@ -234,7 +236,7 @@ func (n *SimpleNet) checkConnErr(err error, conn *Connection) error {
 func (n *SimpleNet) handleRead(conn *Connection) {
 
 	for {
-		headlen := 0
+		headlen := (uint32)(0)
 		if conn.Proto != nil {
 			headlen = conn.Proto.HeadLen()
 		}

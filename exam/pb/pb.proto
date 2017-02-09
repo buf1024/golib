@@ -1,0 +1,21 @@
+package pb;
+
+// 心跳请求 0x00010001
+message HeartBeatReq{
+  required string SID = 1;
+}
+// 心跳回应 0x00010002
+message HeartBeatRsp{
+  required string SID = 1;
+}
+
+// 业务请求 0x00010003
+message BizReq{
+  required string SID = 1;
+  required string Biz = 2;
+}
+// 业务回应 0x00010004
+message BizRsp{
+  required int32 RetCode = 1;
+  required string SID = 2;
+}
