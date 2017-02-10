@@ -45,7 +45,7 @@ type Connection struct {
 	remoteAddr string
 	upTime     time.Time
 
-	Proto    IProto // 为了实现多种proto
+	proto    IProto // 为了实现多种proto
 	UserData interface{}
 }
 
@@ -81,7 +81,7 @@ type Listener struct {
 
 	lockClient sync.Locker
 
-	Proto    IProto
+	proto    IProto
 	UserData interface{}
 }
 
@@ -121,8 +121,6 @@ type IProto interface {
 func NewSimpleNet() *SimpleNet {
 	n := &SimpleNet{
 		events:     make(chan *ConnEvent, 1024),
-		connClient: make([]*Connection, 1),
-		connServer: make([]*Listener, 1),
 		lockServer: &sync.Mutex{},
 		lockClient: &sync.Mutex{},
 	}
@@ -182,10 +180,8 @@ func (n *SimpleNet) syncAddClient(conn *Connection) {
 
 	if conn.listen != nil {
 		conn.listen.conns = connQueue
-		fmt.Printf("LISTEN CONN: %d\n", len(conn.listen.conns))
 	} else {
 		n.connClient = connQueue
-		fmt.Printf("CLIET CONN: %d\n", len(n.connClient))
 	}
 }
 func (n *SimpleNet) syncDelClient(conn *Connection) {
@@ -217,10 +213,8 @@ func (n *SimpleNet) syncDelClient(conn *Connection) {
 	if del {
 		if conn.listen != nil {
 			conn.listen.conns = connQueue
-			fmt.Printf("LISTEN CONN: %d\n", len(conn.listen.conns))
 		} else {
 			n.connClient = connQueue
-			fmt.Printf("CLIET CONN: %d\n", len(n.connClient))
 		}
 	}
 }
@@ -253,16 +247,16 @@ func (n *SimpleNet) handleRead(conn *Connection) {
 
 	for {
 		headlen := (uint32)(0)
-		if conn.Proto != nil {
-			headlen = conn.Proto.HeadLen()
+		if conn.proto != nil {
+			headlen = conn.proto.HeadLen()
 		}
 		if headlen <= 0 {
 			buf := make([]byte, 1)
 			count, err := conn.conn.Read(buf)
-			fmt.Printf("count=%d, err=%s\n", count, err)
 			if err = n.checkConnErr(count, err, conn); err != nil {
 				return
 			}
+
 			// emit
 			event := &ConnEvent{
 				EventType: EventNewConnectionData,
@@ -277,7 +271,7 @@ func (n *SimpleNet) handleRead(conn *Connection) {
 			if err = n.checkConnErr(count, err, conn); err != nil {
 				return
 			}
-			headmsg, bodylen, err := conn.Proto.BodyLen(head)
+			headmsg, bodylen, err := conn.proto.BodyLen(head)
 			if err != nil {
 				// emit EventConnectionError
 				event := &ConnEvent{
@@ -288,8 +282,13 @@ func (n *SimpleNet) handleRead(conn *Connection) {
 				n.events <- event
 				continue
 			}
+
 			body := make([]byte, bodylen)
-			data, err := conn.Proto.Parse(headmsg, body)
+			count, err = conn.conn.Read(body)
+			if err = n.checkConnErr(count, err, conn); err != nil {
+				return
+			}
+			data, err := conn.proto.Parse(headmsg, body)
 			if err != nil {
 				// emit EventConnectionError
 				event := &ConnEvent{
@@ -350,12 +349,12 @@ func (n *SimpleNet) listening(l *Listener) {
 			msgChan:    make(chan []byte, 1024),
 			localAddr:  newconn.LocalAddr().String(),
 			remoteAddr: newconn.RemoteAddr().String(),
-			Proto:      l.Proto,
+			proto:      l.proto,
 			upTime:     time.Now(),
 		}
 
-		if conn.Proto != nil {
-			if !conn.Proto.FilterAccept(conn) {
+		if conn.proto != nil {
+			if !conn.proto.FilterAccept(conn) {
 				continue
 			}
 		}
@@ -376,7 +375,7 @@ func (n *SimpleNet) listening(l *Listener) {
 }
 
 // Listen 监听网络 addr 为监听地址
-func (n *SimpleNet) Listen(addr string) (*Listener, error) {
+func (n *SimpleNet) Listen(addr string, proto IProto) (*Listener, error) {
 	listen, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, err
@@ -388,8 +387,9 @@ func (n *SimpleNet) Listen(addr string) (*Listener, error) {
 		id:         atomic.AddInt64(&n.nextid, 1),
 		status:     StatusListenning,
 		listen:     listen,
-		conns:      make([]*Connection, 1),
 		lockClient: &sync.Mutex{},
+
+		proto: proto,
 	}
 	n.syncAddListen(l)
 
@@ -399,7 +399,7 @@ func (n *SimpleNet) Listen(addr string) (*Listener, error) {
 }
 
 // Connect 连接服务器器
-func (n *SimpleNet) Connect(addr string) (*Connection, error) {
+func (n *SimpleNet) Connect(addr string, proto IProto) (*Connection, error) {
 	newconn, err := net.Dial("tcp", addr)
 	if err != nil {
 		return nil, err
@@ -414,6 +414,7 @@ func (n *SimpleNet) Connect(addr string) (*Connection, error) {
 		localAddr:  newconn.LocalAddr().String(),
 		remoteAddr: newconn.RemoteAddr().String(),
 		upTime:     time.Now(),
+		proto:      proto,
 	}
 	n.syncAddClient(conn)
 
@@ -446,14 +447,14 @@ func (n *SimpleNet) PollEvent(timeout int) (*ConnEvent, error) {
 
 // SendData 向connection发送数据，如果connection不支持，data为[]byte
 func (n *SimpleNet) SendData(conn *Connection, data interface{}) error {
-	if conn.Proto == nil {
+	if conn.proto == nil {
 		msg, ok := (data).([]byte)
 		if !ok {
 			return fmt.Errorf("unexpect data type")
 		}
 		conn.msgChan <- msg
 	} else {
-		msg, err := conn.Proto.Serialize(data)
+		msg, err := conn.proto.Serialize(data)
 		if err != nil {
 			return err
 		}

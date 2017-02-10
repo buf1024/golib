@@ -67,6 +67,8 @@ func clientRcv(conn *mynet.Connection) {
 	n := conn.Net()
 	data := conn.UserData.(*userData)
 	w := data.w
+	c := data.c
+
 	for {
 		evt, err := n.PollEvent(1000 * 60)
 		if err != nil {
@@ -80,11 +82,17 @@ func clientRcv(conn *mynet.Connection) {
 			{
 				fmt.Printf("event error: local = %s, remote = %s\n",
 					conn.LocalAddress(), conn.RemoteAddress())
+				close(c)
+				w.Done()
+				return
 			}
 		case evt.EventType == mynet.EventConnectionClosed:
 			{
 				fmt.Printf("event close: local = %s, remote = %s\n",
 					conn.LocalAddress(), conn.RemoteAddress())
+				close(c)
+				w.Done()
+				return
 			}
 		case evt.EventType == mynet.EventNewConnectionData:
 			{
@@ -108,11 +116,16 @@ func clientSend(conn *mynet.Connection) {
 
 	for {
 		select {
-		case msg := <-c:
+		case msg, ok := <-c:
 			{
+				if !ok {
+					w.Done()
+					return
+				}
 				switch msg {
 				case "quit":
 					{
+						n.CloseConn(conn)
 						w.Done()
 						return
 					}
@@ -140,6 +153,9 @@ func clientSend(conn *mynet.Connection) {
 					}
 				default:
 					{
+						if len(msg) <= 0 {
+							continue
+						}
 						m := &pb.PbProto{}
 						m.H.Command = pb.CMDBizReq
 						// beartbeat
@@ -149,7 +165,8 @@ func clientSend(conn *mynet.Connection) {
 							continue
 						}
 						pbiz := p.(*pb.BizReq)
-						pbiz.SID = proto.String(msg)
+						pbiz.SID = proto.String(pb.SID(8))
+						pbiz.Biz = proto.String(msg)
 						m.B = pbiz
 
 						fmt.Printf("SEND：\n%s\n", pro.Debug(m))
@@ -175,6 +192,10 @@ func input(conn *mynet.Connection) {
 	for {
 		line, _, _ := reader.ReadLine()
 		msg := string(line)
+		if conn.Status() != mynet.StatusConnected {
+			w.Done()
+			break
+		}
 		c <- msg
 		if msg == "quit" {
 			w.Done()
@@ -187,19 +208,19 @@ func main() {
 
 	n := mynet.NewSimpleNet()
 
-	c, e := n.Connect("127.0.0.1:3369")
+	data := &userData{
+		w:     &sync.WaitGroup{},
+		c:     make(chan string),
+		proto: &pb.PbServerProto{},
+	}
+
+	c, e := n.Connect("127.0.0.1:4369", data.proto)
 	if e != nil {
 		fmt.Printf("conn failed, err=%s\n", e)
 		os.Exit(-1)
 	}
 	fmt.Printf("connect to 127.0.0.1:3369 success\n")
 
-	data := &userData{
-		w:     &sync.WaitGroup{},
-		c:     make(chan string),
-		proto: &pb.PbServerProto{},
-	}
-	c.Proto = data.proto
 	c.UserData = data
 
 	w := data.w
@@ -216,4 +237,6 @@ func main() {
 	w.Wait()
 
 	mynet.SimpleNetDestroy(n)
+
+	fmt.Printf("client Done\n")
 }

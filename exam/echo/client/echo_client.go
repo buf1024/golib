@@ -113,7 +113,7 @@ func main() {
 
 	n := mynet.NewSimpleNet()
 
-	c, e := n.Connect("127.0.0.1:3369")
+	c, e := n.Connect("127.0.0.1:3369", nil)
 	if e != nil {
 		fmt.Printf("conn failed, err=%s\n", e)
 		os.Exit(-1)
@@ -140,4 +140,6 @@ func main() {
 	w.Wait()
 
 	mynet.SimpleNetDestroy(n)
+
+	fmt.Printf("client Done\n")
 }

@@ -70,7 +70,7 @@ func (p *PbServerProto) BodyLen(head []byte) (interface{}, uint32, error) {
 	if err != nil {
 		return nil, 0, err
 	}
-	return head, h.Length, nil
+	return h, h.Length, nil
 }
 func (p *PbServerProto) Parse(head interface{}, body []byte) (interface{}, error) {
 	m := &PbProto{
@@ -125,13 +125,17 @@ func (p *PbServerProto) GetMessage(command uint64) (proto.Message, error) {
 		proto.Clone(m)
 		return m, nil
 	}
-	return nil, fmt.Errorf("mommand %d not found", command)
+	return nil, fmt.Errorf("command %d not found", command)
 }
 
 func SID(len int32) string {
-	sid := make([]byte, len)
+	sid := make([]byte, len/2)
 	rand.Read(sid)
-	return string(sid)
+	s := ""
+	for _, v := range sid {
+		s = fmt.Sprintf("%s%x", s, v)
+	}
+	return s
 }
 
 func init() {

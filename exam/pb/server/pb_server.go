@@ -101,7 +101,7 @@ func (s *pbserver) del(con *mynet.Connection) {
 func (s *pbserver) hearbeat() {
 END:
 	for {
-		t := time.After(time.Second * 10)
+		t := time.After(time.Second * 5)
 		select {
 		case <-t:
 			{
@@ -116,6 +116,8 @@ END:
 					if v.Status() != mynet.StatusBroken {
 						up := v.UpdateTime()
 						diff := n.Unix() - up.Unix()
+						fmt.Printf("now = %d, up = %d diff = %d\n",
+							n.Unix(), up.Unix(), diff)
 						if diff > 10 {
 							m := &pb.PbProto{}
 							m.H.Command = pb.CMDHeartBeatReq
@@ -203,16 +205,14 @@ func (s *pbserver) destroy() {
 func main() {
 	s := &pbserver{
 		n:     mynet.NewSimpleNet(),
-		conns: make([]*mynet.Connection, 1),
 		proto: &pb.PbServerProto{},
 	}
 
-	listen, e := s.n.Listen("127.0.0.1:4369")
+	listen, e := s.n.Listen("127.0.0.1:4369", s.proto)
 	if e != nil {
 		fmt.Printf("listen failed, err=%s\n", e)
 		os.Exit(-1)
 	}
-	listen.Proto = s.proto
 	s.listen = listen
 
 	s.server()

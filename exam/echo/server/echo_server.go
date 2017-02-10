@@ -56,7 +56,7 @@ func main() {
 
 	n := mynet.NewSimpleNet()
 
-	s, e := n.Listen("127.0.0.1:3369")
+	s, e := n.Listen("127.0.0.1:3369", nil)
 	if e != nil {
 		fmt.Printf("listen failed, err=%s\n", e)
 		os.Exit(-1)
