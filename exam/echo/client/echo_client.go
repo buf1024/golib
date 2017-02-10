@@ -20,6 +20,7 @@ func clientRcv(conn *mynet.Connection) {
 	n := conn.Net()
 	data := conn.UserData.(*userData)
 	w := data.w
+	c := data.c
 	for {
 		evt, err := n.PollEvent(1000 * 60)
 		if err != nil {
@@ -29,12 +30,23 @@ func clientRcv(conn *mynet.Connection) {
 		}
 		conn := evt.Conn
 		switch {
-		case evt.EventType == mynet.EventError:
+		case evt.EventType == mynet.EventConnectionError:
 			{
 				fmt.Printf("event error: local = %s, remote = %s\n",
 					conn.LocalAddress(), conn.RemoteAddress())
+				close(c)
+				w.Done()
+				return
 			}
-		case evt.EventType == mynet.EventNewData:
+		case evt.EventType == mynet.EventConnectionClosed:
+			{
+				fmt.Printf("event close: local = %s, remote = %s\n",
+					conn.LocalAddress(), conn.RemoteAddress())
+				close(c)
+				w.Done()
+				return
+			}
+		case evt.EventType == mynet.EventNewConnectionData:
 			{
 				data := evt.Data.([]byte)
 				fmt.Printf("client receve: %s\n", (string)(data))
@@ -55,9 +67,14 @@ func clientSend(conn *mynet.Connection) {
 
 	for {
 		select {
-		case msg := <-c:
+		case msg, ok := <-c:
 			{
+				if !ok {
+					w.Done()
+					return
+				}
 				if msg == "quit" {
+					n.CloseConn(conn)
 					w.Done()
 					return
 				}
@@ -80,6 +97,10 @@ func input(conn *mynet.Connection) {
 	for {
 		line, _, _ := reader.ReadLine()
 		msg := string(line)
+		if conn.Status() != mynet.StatusConnected {
+			w.Done()
+			break
+		}
 		c <- msg
 		if msg == "quit" {
 			w.Done()

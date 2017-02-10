@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"math/rand"
+	"time"
 
 	mynet "github.com/buf1024/golib/net"
 	"github.com/golang/protobuf/proto"
@@ -74,7 +76,7 @@ func (p *PbServerProto) Parse(head interface{}, body []byte) (interface{}, error
 	m := &PbProto{
 		H: *(head.(*Head)),
 	}
-	pb, err := getMessage(m.H.Command)
+	pb, err := p.GetMessage(m.H.Command)
 	if err != nil {
 		return nil, err
 	}
@@ -118,7 +120,7 @@ func (p *PbServerProto) Debug(msg *PbProto) string {
 		msg.H.Command, msg.H.Length, msg.H.Extral, proto.CompactTextString(msg.B))
 }
 
-func getMessage(command uint64) (proto.Message, error) {
+func (p *PbServerProto) GetMessage(command uint64) (proto.Message, error) {
 	if m, ok := message[command]; ok {
 		proto.Clone(m)
 		return m, nil
@@ -126,7 +128,16 @@ func getMessage(command uint64) (proto.Message, error) {
 	return nil, fmt.Errorf("mommand %d not found", command)
 }
 
+func SID(len int32) string {
+	sid := make([]byte, len)
+	rand.Read(sid)
+	return string(sid)
+}
+
 func init() {
+
+	rand.NewSource(time.Now().UnixNano())
+
 	message = make(map[uint64]proto.Message)
 
 	message[CMDHeartBeatReq] = &HeartBeatReq{} //0x00010001 // 心跳请求

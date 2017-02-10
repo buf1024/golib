@@ -20,12 +20,17 @@ func server(listen *mynet.Listener) {
 		}
 		conn := evt.Conn
 		switch {
-		case evt.EventType == mynet.EventError:
+		case evt.EventType == mynet.EventConnectionError:
 			{
 				fmt.Printf("event error: local = %s, remote = %s\n",
 					conn.LocalAddress(), conn.RemoteAddress())
 			}
-		case evt.EventType == mynet.EventNewData:
+		case evt.EventType == mynet.EventConnectionClosed:
+			{
+				fmt.Printf("connection close: local = %s, remote = %s\n",
+					conn.LocalAddress(), conn.RemoteAddress())
+			}
+		case evt.EventType == mynet.EventNewConnectionData:
 			{
 				data := evt.Data.([]byte)
 				fmt.Printf("%s", (string)(data))
@@ -34,7 +39,7 @@ func server(listen *mynet.Listener) {
 					fmt.Printf("send data error, err = %s\n", err)
 				}
 			}
-		case evt.EventType == mynet.EventNewConnected:
+		case evt.EventType == mynet.EventNewConnection:
 			{
 				fmt.Printf("client conneced: local = %s, remote = %s\n",
 					conn.LocalAddress(), conn.RemoteAddress())

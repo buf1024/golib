@@ -2,6 +2,7 @@ package net
 
 import (
 	"fmt"
+	"io"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -10,9 +11,11 @@ import (
 
 const (
 	EventNone = iota
-	EventNewConnected
-	EventError
-	EventNewData
+	EventNewConnection
+	EventConnectionError
+	EventConnectionClosed
+	EventNewConnectionData
+	EventProtoError
 	EventTimeout
 )
 
@@ -24,7 +27,7 @@ const (
 )
 
 type ConnEvent struct {
-	EventType int64
+	EventType int
 	Conn      *Connection
 	Data      interface{}
 }
@@ -63,6 +66,9 @@ func (c *Connection) LocalAddress() string {
 
 func (c *Connection) RemoteAddress() string {
 	return c.remoteAddr
+}
+func (c *Connection) UpdateTime() time.Time {
+	return c.upTime
 }
 
 type Listener struct {
@@ -176,8 +182,10 @@ func (n *SimpleNet) syncAddClient(conn *Connection) {
 
 	if conn.listen != nil {
 		conn.listen.conns = connQueue
+		fmt.Printf("LISTEN CONN: %d\n", len(conn.listen.conns))
 	} else {
 		n.connClient = connQueue
+		fmt.Printf("CLIET CONN: %d\n", len(n.connClient))
 	}
 }
 func (n *SimpleNet) syncDelClient(conn *Connection) {
@@ -209,23 +217,31 @@ func (n *SimpleNet) syncDelClient(conn *Connection) {
 	if del {
 		if conn.listen != nil {
 			conn.listen.conns = connQueue
+			fmt.Printf("LISTEN CONN: %d\n", len(conn.listen.conns))
 		} else {
 			n.connClient = connQueue
+			fmt.Printf("CLIET CONN: %d\n", len(n.connClient))
 		}
 	}
 }
 
-func (n *SimpleNet) checkConnErr(err error, conn *Connection) error {
-	if err != nil && conn.status == StatusConnected {
-		close(conn.msgChan)
-		conn.conn.Close()
-		conn.status = StatusBroken
+func (n *SimpleNet) checkConnErr(count int, err error, conn *Connection) error {
+	if err != nil {
+		if conn.status == StatusConnected {
+			close(conn.msgChan)
+			conn.conn.Close()
+			conn.status = StatusBroken
 
-		n.syncDelClient(conn)
+			n.syncDelClient(conn)
+		}
+		evt := EventConnectionError
+		if err == io.EOF {
+			evt = EventConnectionClosed
+		}
 
-		// emit EventError
+		// emit EventConnectionError
 		event := &ConnEvent{
-			EventType: EventError,
+			EventType: evt,
 			Conn:      conn,
 			Data:      err,
 		}
@@ -242,13 +258,14 @@ func (n *SimpleNet) handleRead(conn *Connection) {
 		}
 		if headlen <= 0 {
 			buf := make([]byte, 1)
-			_, err := conn.conn.Read(buf)
-			if err = n.checkConnErr(err, conn); err != nil {
+			count, err := conn.conn.Read(buf)
+			fmt.Printf("count=%d, err=%s\n", count, err)
+			if err = n.checkConnErr(count, err, conn); err != nil {
 				return
 			}
-			// emit EventNewData
+			// emit
 			event := &ConnEvent{
-				EventType: EventNewData,
+				EventType: EventNewConnectionData,
 				Conn:      conn,
 				Data:      buf,
 			}
@@ -256,22 +273,36 @@ func (n *SimpleNet) handleRead(conn *Connection) {
 
 		} else {
 			head := make([]byte, headlen)
-			_, err := conn.conn.Read(head)
-			if err = n.checkConnErr(err, conn); err != nil {
+			count, err := conn.conn.Read(head)
+			if err = n.checkConnErr(count, err, conn); err != nil {
 				return
 			}
 			headmsg, bodylen, err := conn.Proto.BodyLen(head)
-			if err = n.checkConnErr(err, conn); err != nil {
-				return
+			if err != nil {
+				// emit EventConnectionError
+				event := &ConnEvent{
+					EventType: EventProtoError,
+					Conn:      conn,
+					Data:      err,
+				}
+				n.events <- event
+				continue
 			}
 			body := make([]byte, bodylen)
 			data, err := conn.Proto.Parse(headmsg, body)
-			if err = n.checkConnErr(err, conn); err != nil {
-				return
+			if err != nil {
+				// emit EventConnectionError
+				event := &ConnEvent{
+					EventType: EventProtoError,
+					Conn:      conn,
+					Data:      err,
+				}
+				n.events <- event
+				continue
 			}
-			// emit EventNewData
+			// emit EventNewConnectionData
 			event := &ConnEvent{
-				EventType: EventNewData,
+				EventType: EventNewConnectionData,
 				Conn:      conn,
 				Data:      data,
 			}
@@ -289,8 +320,8 @@ func (n *SimpleNet) handleWrite(conn *Connection) {
 				if !ok {
 					return
 				}
-				_, err := conn.conn.Write(msg)
-				if err = n.checkConnErr(err, conn); err != nil {
+				count, err := conn.conn.Write(msg)
+				if err = n.checkConnErr(count, err, conn); err != nil {
 					return
 				}
 				conn.upTime = time.Now()
@@ -331,9 +362,9 @@ func (n *SimpleNet) listening(l *Listener) {
 
 		n.syncAddClient(conn)
 
-		// emit EventNewConnected
+		// emit EventNewConnection
 		event := &ConnEvent{
-			EventType: EventNewConnected,
+			EventType: EventNewConnection,
 			Conn:      conn,
 		}
 		n.events <- event
