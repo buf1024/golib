@@ -7,6 +7,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	mylog "github.com/buf1024/golib/logging"
 )
 
 const (
@@ -104,7 +106,10 @@ type SimpleNet struct {
 	lockServer sync.Locker
 	lockClient sync.Locker
 
-	nextid int64
+	nextid  int64
+	destroy bool
+
+	log *mylog.Log
 
 	UserData interface{}
 }
@@ -118,11 +123,12 @@ type IProto interface {
 }
 
 // NewSimpleNet 创建
-func NewSimpleNet() *SimpleNet {
+func NewSimpleNet(log *mylog.Log) *SimpleNet {
 	n := &SimpleNet{
 		events:     make(chan *ConnEvent, 1024),
 		lockServer: &sync.Mutex{},
 		lockClient: &sync.Mutex{},
+		log:        log,
 	}
 
 	return n
@@ -137,6 +143,30 @@ func SimpleNetDestroy(n *SimpleNet) {
 	for _, v := range n.connServer {
 		n.CloseListen(v)
 	}
+	n.destroy = true
+}
+
+func (n *SimpleNet) logMsg(level int, msg string) {
+	if n.log != nil {
+		switch level {
+		case mylog.LevelTrace:
+			n.log.Trace("%s", msg)
+		case mylog.LevelDebug:
+			n.log.Debug("%s", msg)
+		case mylog.LevelInformational:
+			n.log.Info("%s", msg)
+		case mylog.LevelNotice:
+			n.log.Notice("%s", msg)
+		case mylog.LevelWarning:
+			n.log.Warning("%s", msg)
+		case mylog.LevelError:
+			n.log.Error("%s", msg)
+		case mylog.LevelCritical:
+			n.log.Critical("%s", msg)
+		}
+		return
+	}
+	fmt.Printf("%s", msg)
 }
 
 func (n *SimpleNet) syncAddListen(listen *Listener) {
@@ -221,6 +251,11 @@ func (n *SimpleNet) syncDelClient(conn *Connection) {
 
 func (n *SimpleNet) checkConnErr(count int, err error, conn *Connection) error {
 	if err != nil {
+		n.logMsg(mylog.LevelError, fmt.Sprintf("conn err = %s\n", err))
+		if conn.net.destroy {
+			n.logMsg(mylog.LevelError, fmt.Sprintf("net destroy\n"))
+			return err
+		}
 		if conn.status == StatusConnected {
 			close(conn.msgChan)
 			conn.conn.Close()
@@ -232,6 +267,7 @@ func (n *SimpleNet) checkConnErr(count int, err error, conn *Connection) error {
 		if err == io.EOF {
 			evt = EventConnectionClosed
 		}
+		n.logMsg(mylog.LevelDebug, fmt.Sprintf("event type %d\n", evt))
 
 		// emit EventConnectionError
 		event := &ConnEvent{
@@ -244,7 +280,12 @@ func (n *SimpleNet) checkConnErr(count int, err error, conn *Connection) error {
 	return err
 }
 func (n *SimpleNet) handleRead(conn *Connection) {
-
+	defer func() {
+		err := recover()
+		if err != nil {
+			n.logMsg(mylog.LevelError, fmt.Sprintf("handleRead panic: %s\n", err))
+		}
+	}()
 	for {
 		headlen := (uint32)(0)
 		if conn.proto != nil {
@@ -256,6 +297,9 @@ func (n *SimpleNet) handleRead(conn *Connection) {
 			if err = n.checkConnErr(count, err, conn); err != nil {
 				return
 			}
+			n.logMsg(mylog.LevelInformational,
+				fmt.Sprintf("read data, count = %d, remoteAddr: = %s\n",
+					count, conn.conn.RemoteAddr()))
 
 			// emit
 			event := &ConnEvent{
@@ -271,6 +315,9 @@ func (n *SimpleNet) handleRead(conn *Connection) {
 			if err = n.checkConnErr(count, err, conn); err != nil {
 				return
 			}
+			n.logMsg(mylog.LevelInformational,
+				fmt.Sprintf("read data, count = %d, remoteAddr: = %s\n",
+					count, conn.conn.RemoteAddr()))
 			headmsg, bodylen, err := conn.proto.BodyLen(head)
 			if err != nil {
 				// emit EventConnectionError
@@ -288,6 +335,10 @@ func (n *SimpleNet) handleRead(conn *Connection) {
 			if err = n.checkConnErr(count, err, conn); err != nil {
 				return
 			}
+			n.logMsg(mylog.LevelInformational,
+				fmt.Sprintf("read data, count = %d, remoteAddr: = %s\n",
+					count, conn.conn.RemoteAddr()))
+
 			data, err := conn.proto.Parse(headmsg, body)
 			if err != nil {
 				// emit EventConnectionError
@@ -312,6 +363,13 @@ func (n *SimpleNet) handleRead(conn *Connection) {
 }
 
 func (n *SimpleNet) handleWrite(conn *Connection) {
+	defer func() {
+		err := recover()
+		if err != nil {
+			n.logMsg(mylog.LevelError,
+				fmt.Sprintf("handleWrite panic: %s\n", err))
+		}
+	}()
 	for {
 		select {
 		case msg, ok := <-conn.msgChan:
@@ -324,16 +382,27 @@ func (n *SimpleNet) handleWrite(conn *Connection) {
 					return
 				}
 				conn.upTime = time.Now()
+				n.logMsg(mylog.LevelInformational,
+					fmt.Sprintf("send data, count = %d, remoteAddr = %s\n",
+						count, conn.conn.RemoteAddr()))
 			}
 		}
 	}
 }
 
 func (n *SimpleNet) listening(l *Listener) {
+	defer func() {
+		err := recover()
+		if err != nil {
+			n.logMsg(mylog.LevelError,
+				fmt.Sprintf("listenning panic: %s\n", err))
+		}
+	}()
 	for {
 		newconn, err := l.listen.Accept()
 		if err != nil {
-			fmt.Printf("accept failed, err = %s\n", err)
+			n.logMsg(mylog.LevelError,
+				fmt.Sprintf("accept failed, err = %s\n", err))
 			if l.status != StatusListenning {
 				break
 			}
@@ -447,6 +516,9 @@ func (n *SimpleNet) PollEvent(timeout int) (*ConnEvent, error) {
 
 // SendData 向connection发送数据，如果connection不支持，data为[]byte
 func (n *SimpleNet) SendData(conn *Connection, data interface{}) error {
+	if conn.status != StatusConnected {
+		return fmt.Errorf("not connected connection")
+	}
 	if conn.proto == nil {
 		msg, ok := (data).([]byte)
 		if !ok {
@@ -465,22 +537,25 @@ func (n *SimpleNet) SendData(conn *Connection, data interface{}) error {
 
 // CloseConn 关闭连接
 func (n *SimpleNet) CloseConn(conn *Connection) error {
-	conn.status = StatusBroken
-	close(conn.msgChan)
-	conn.conn.Close()
+	if conn.status == StatusConnected {
+		conn.status = StatusBroken
+		close(conn.msgChan)
+		conn.conn.Close()
 
-	n.syncDelClient(conn)
-
+		n.syncDelClient(conn)
+	}
 	return nil
 }
 
 // CloseListen 关闭服务器
 func (n *SimpleNet) CloseListen(listen *Listener) error {
-	for _, v := range listen.conns {
-		n.CloseConn(v)
+	if listen.status == StatusListenning {
+		for _, v := range listen.conns {
+			n.CloseConn(v)
+		}
+		listen.status = StatusBroken
+		listen.listen.Close()
 	}
-	listen.status = StatusBroken
-	listen.listen.Close()
 
 	return nil
 }

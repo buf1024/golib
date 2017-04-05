@@ -58,7 +58,8 @@ var loggerTraced = make(map[string]Loger)
 
 func (l *Log) Critical(format string, a ...interface{}) {
 	if l.status != statusRunning {
-		fmt.Printf("logging status not right, status = %d\n", l.status)
+		fmt.Printf("Critical logging status not right, status = %d, msg = %s\n",
+			l.status, fmt.Sprintf(format, a...))
 		return
 	}
 	now := time.Now()
@@ -74,7 +75,8 @@ func (l *Log) Critical(format string, a ...interface{}) {
 
 func (l *Log) Error(format string, a ...interface{}) {
 	if l.status != statusRunning {
-		fmt.Printf("logging status not right, status = %d\n", l.status)
+		fmt.Printf("Error logging status not right, status = %d, msg = %s\n",
+			l.status, fmt.Sprintf(format, a...))
 		return
 	}
 	now := time.Now()
@@ -90,7 +92,8 @@ func (l *Log) Error(format string, a ...interface{}) {
 
 func (l *Log) Warning(format string, a ...interface{}) {
 	if l.status != statusRunning {
-		fmt.Printf("logging status not right, status = %d\n", l.status)
+		fmt.Printf("Warning logging status not right, status = %d, msg = %s\n",
+			l.status, fmt.Sprintf(format, a...))
 		return
 	}
 	now := time.Now()
@@ -105,7 +108,8 @@ func (l *Log) Warning(format string, a ...interface{}) {
 }
 func (l *Log) Notice(format string, a ...interface{}) {
 	if l.status != statusRunning {
-		fmt.Printf("logging status not right, status = %d\n", l.status)
+		fmt.Printf("Notice logging status not right, status = %d, msg = %s\n",
+			l.status, fmt.Sprintf(format, a...))
 		return
 	}
 	now := time.Now()
@@ -121,7 +125,8 @@ func (l *Log) Notice(format string, a ...interface{}) {
 
 func (l *Log) Info(format string, a ...interface{}) {
 	if l.status != statusRunning {
-		fmt.Printf("logging status not right, status = %d\n", l.status)
+		fmt.Printf("Info logging status not right, status = %d, msg = %s\n",
+			l.status, fmt.Sprintf(format, a...))
 		return
 	}
 	now := time.Now()
@@ -137,7 +142,8 @@ func (l *Log) Info(format string, a ...interface{}) {
 
 func (l *Log) Debug(format string, a ...interface{}) {
 	if l.status != statusRunning {
-		fmt.Printf("logging status not right, status = %d\n", l.status)
+		fmt.Printf("Debug logging status not right, status = %d, msg = %s\n",
+			l.status, fmt.Sprintf(format, a...))
 		return
 	}
 	now := time.Now()
@@ -152,7 +158,8 @@ func (l *Log) Debug(format string, a ...interface{}) {
 }
 func (l *Log) Trace(format string, a ...interface{}) {
 	if l.status != statusRunning {
-		fmt.Printf("logging status not right, status = %d\n", l.status)
+		fmt.Printf("Trace logging status not right, status = %d, msg = %s\n",
+			l.status, fmt.Sprintf(format, a...))
 		return
 	}
 	now := time.Now()
@@ -187,7 +194,7 @@ func (l *Log) logMessage(chanMsg *Message, logMsg string, format string, a ...in
 
 func (l *Log) Sync() {
 	if l.status != statusRunning {
-		fmt.Printf("logging status not right, status = %d\n", l.status)
+		fmt.Printf("Sync logging status not right, status = %d\n", l.status)
 		return
 	}
 	l.mutex.Lock()
