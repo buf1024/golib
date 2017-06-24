@@ -94,7 +94,7 @@ func publicDecrypt(pub *rsa.PublicKey, hash crypto.Hash, hashed []byte, sig []by
 }
 
 func PrivateEncrypt(privt *rsa.PrivateKey, data []byte) ([]byte, error) {
-	signData, err := rsa.SignPKCS1v15(nil, privt, crypto.Hash(0), []byte(data))
+	signData, err := rsa.SignPKCS1v15(nil, privt, crypto.Hash(0), data)
 	if err != nil {
 		return nil, err
 	}
