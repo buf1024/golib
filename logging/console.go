@@ -2,6 +2,7 @@ package logging
 
 import (
 	"encoding/json"
+
 	"github.com/fatih/color"
 )
 
@@ -37,8 +38,8 @@ func init() {
 	colorLevel[LevelCritical] = color.FgRed
 	colorLevel[LevelError] = color.FgHiRed
 	colorLevel[LevelWarning] = color.FgMagenta
-	colorLevel[LevelNotice] = color.FgBlue
-	colorLevel[LevelInformational] = color.FgHiBlue
+	colorLevel[LevelNotice] = color.FgCyan
+	colorLevel[LevelInformational] = color.FgHiCyan
 	colorLevel[LevelDebug] = color.FgGreen
 	colorLevel[LevelTrace] = color.FgHiGreen
 	colorLevel[LevelAll] = color.FgWhite

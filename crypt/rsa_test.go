@@ -11,6 +11,20 @@ import (
 	"fmt"
 )
 
+func assertArrayEqual(t *testing.T, a []byte, b []byte) {
+	fmt.Printf("array1: %v, araray2: %v\n", a, b)
+	if len(a) != len(b) {
+		t.Fatal("array not equal!")
+		return
+	}
+	for i := 0; i < len(a); i++ {
+		if a[i] != b[i] {
+			t.Fatalf("array not equal at position %d, %d != %d", i, a[i], b[i])
+			return
+		}
+	}
+}
+
 func TestRsaCrypt(t *testing.T) {
 	bs, err := ioutil.ReadFile("1.key")
 	if err != nil {
@@ -52,10 +66,70 @@ func TestRsaCrypt(t *testing.T) {
 	}
 	fmt.Printf("dec data = %s\n", string(testDecData))
 
-	testDataBytes := []byte(testData)
-	fmt.Println(testDataBytes)
-	fmt.Println(testDecData)
-	if string(testDecData) != testData {
-		t.Fatal("testDecData != testData")
+	testByteData := []byte{}
+	testEncData, err = PrivateEncrypt(privt, testByteData)
+	if err != nil {
+		t.Fatalf("PrivateEncrypt failed, err=%s", err)
 	}
+	testDecData, err = PublicDecrypt(pub, testEncData)
+	if err != nil {
+		t.Fatalf("PublicDecrypt failed, err=%s", err)
+	}
+	assertArrayEqual(t, testByteData, testDecData)
+
+	testByteData = []byte{0xff, 0xff, 0xff, 0x00, 0x00}
+	testEncData, err = PrivateEncrypt(privt, testByteData)
+	if err != nil {
+		t.Fatalf("PrivateEncrypt failed, err=%s", err)
+	}
+	testDecData, err = PublicDecrypt(pub, testEncData)
+	if err != nil {
+		t.Fatalf("PublicDecrypt failed, err=%s", err)
+	}
+	assertArrayEqual(t, testByteData, testDecData)
+
+	testByteData = []byte{0x00, 0x00, 0x00, 0x00, 0x00}
+	testEncData, err = PrivateEncrypt(privt, testByteData)
+	if err != nil {
+		t.Fatalf("PrivateEncrypt failed, err=%s", err)
+	}
+	testDecData, err = PublicDecrypt(pub, testEncData)
+	if err != nil {
+		t.Fatalf("PublicDecrypt failed, err=%s", err)
+	}
+	assertArrayEqual(t, testByteData, testDecData)
+
+	testByteData = []byte{0xff, 0xff, 0xff, 0xff, 0xff}
+	testEncData, err = PrivateEncrypt(privt, testByteData)
+	if err != nil {
+		t.Fatalf("PrivateEncrypt failed, err=%s", err)
+	}
+	testDecData, err = PublicDecrypt(pub, testEncData)
+	if err != nil {
+		t.Fatalf("PublicDecrypt failed, err=%s", err)
+	}
+	assertArrayEqual(t, testByteData, testDecData)
+
+	testByteData = []byte{0xff}
+	testEncData, err = PrivateEncrypt(privt, testByteData)
+	if err != nil {
+		t.Fatalf("PrivateEncrypt failed, err=%s", err)
+	}
+	testDecData, err = PublicDecrypt(pub, testEncData)
+	if err != nil {
+		t.Fatalf("PublicDecrypt failed, err=%s", err)
+	}
+	assertArrayEqual(t, testByteData, testDecData)
+
+	testByteData = []byte{0x00}
+	testEncData, err = PrivateEncrypt(privt, testByteData)
+	if err != nil {
+		t.Fatalf("PrivateEncrypt failed, err=%s", err)
+	}
+	testDecData, err = PublicDecrypt(pub, testEncData)
+	if err != nil {
+		t.Fatalf("PublicDecrypt failed, err=%s", err)
+	}
+	assertArrayEqual(t, testByteData, testDecData)
+
 }
