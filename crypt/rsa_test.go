@@ -51,4 +51,11 @@ func TestRsaCrypt(t *testing.T) {
 		t.Fatalf("public decrypt failed")
 	}
 	fmt.Printf("dec data = %s\n", string(testDecData))
+
+	testDataBytes := []byte(testData)
+	fmt.Println(testDataBytes)
+	fmt.Println(testDecData)
+	if string(testDecData) != testData {
+		t.Fatal("testDecData != testData")
+	}
 }
