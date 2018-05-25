@@ -63,8 +63,8 @@ func unLeftPad(input []byte) (out []byte) {
 		if input[i] == 0xff {
 			t = t + 1
 		} else {
-			if input[i] == 0x00 {
-				t = t + 1
+			if input[i] == input[0] {
+				t = t + int(input[1])
 			}
 			break
 		}
